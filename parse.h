@@ -17,6 +17,43 @@ using namespace std;
 namespace svmpack
 {
 
+template < class T > inline T parse(const string& s) {
+    istringstream in(s);
+    T x;
+    in >> x;
+    return x;
+}
+
+template <> inline int parse<int>(const string& s) { return stoi(s);}
+template <> inline long parse<long>(const string& s) { return stol(s);}
+template <> inline long long parse<long long>(const string& s) { return stoll(s);}
+template <> inline unsigned long parse<unsigned long>(const string& s) { return stoul(s);}
+template <> inline unsigned long long parse<unsigned long long>(const string& s) { return stoull(s);}
+template <> inline float parse<float>(const string& s) { return stof(s);}
+template <> inline double parse<double>(const string& s) { return stod(s);}
+template <> inline long double parse<long double>(const string& s) { return stold(s);}
+
+template <> inline string parse<string>(const string& s) { return s;}
+
+template <> inline bool parse<bool> ( const string& str )
+{
+    char ch = str[0];
+    if ( ch == 'T' || ch == 't' || ch == '1' ) return true;
+    if ( ch == 'F' || ch == 'f' || ch == '0' ) return false;
+    if ( string ( str ).find_first_not_of ( "0" ) == string::npos ) {
+        return false;
+    }
+    return true;
+}
+
+template <> inline char parse<char>(const string& s) {
+    if (s.size()==0) {
+        std::cerr << "error string is of zero length!\n";
+        exit(EXIT_FAILURE);
+    }
+    return s[0];
+}
+
 template<class T> inline T parse ( const char *str ) throw ()
 {
     istringstream in ( string ( str ) );
@@ -148,6 +185,18 @@ template <> inline bool parse<bool> ( const char *str ) throw()
         return false;
     }
     return true;
+}
+
+inline void explodeString(const string& str,const string& delims,vector<string>& tokens)
+{
+    tokens.clear();
+    size_t st = str.find_first_not_of(delims,0);
+    size_t fin = str.find_first_of(delims,st);
+    while (st!=string::npos) {
+        tokens.push_back(str.substr(st,fin-st));
+        st = str.find_first_not_of(delims,fin);
+        fin = str.find_first_of(delims,st);
+    }
 }
 
 }

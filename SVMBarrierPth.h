@@ -14,7 +14,7 @@ using namespace std;
 
 namespace svmpack
 {
-#define _USE_TBARRIER_
+//#define _USE_TBARRIER_
 #ifdef _USE_TBARRIER_
 template <class C_t>
 struct CyclicBarrierPth {
@@ -185,7 +185,7 @@ template <class c_t> struct CyclicBarrierPth {
     int nth;
     int tid;
 
-    CyclicBarrierPth ( int& nparty, mem_fun_t<void, c_t>  mfun_in ) :
+    CyclicBarrierPth ( int nparty, mem_fun_t<void, c_t>  mfun_in ) :
         fun ( mfun_in ), mutex ( new pthread_mutex_t() ),
         cond ( new pthread_cond_t() ),
         cnt ( new int ( nparty ) ), nth ( nparty ), tid ( 0 ) {

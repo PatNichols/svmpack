@@ -12,9 +12,11 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <cstring>
 #include "parse.h"
 namespace svmpack
 {
+
 
 class ProgramOptions
 {
@@ -151,8 +153,7 @@ public:
         vector<Option>::const_iterator iend = options.end();
         while ( iter != iend ) {
             if ( iter->matches ( keyword ) ) {
-                string s = iter->getValue();
-                return parse<T> ( s.c_str() );
+                return parse<T> ( iter->getValue() );
             }
             ++iter;
         }

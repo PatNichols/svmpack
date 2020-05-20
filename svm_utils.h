@@ -11,8 +11,9 @@
 #include <iomanip>
 #include <cmath>
 #include <fstream>
-#include "StringTokenizer.h"
 #include <unistd.h>
+#include <vector>
+#include "parse.h"
 using namespace std;
 
 namespace svmpack
@@ -20,9 +21,7 @@ namespace svmpack
 
 inline size_t getMemorySize()
 {
-    size_t npages = sysconf ( _SC_PHYS_PAGES );
-    size_t pgsize = sysconf ( _SC_AVPHYS_PAGES );
-    return npages * pgsize;
+    return size_t(16ULL*1024ULL*1048576ULL);
 };
 
 inline void analyze ( size_t ntp, size_t nfp, size_t ntn, size_t nfn )
@@ -43,7 +42,7 @@ inline void analyze ( size_t ntp, size_t nfp, size_t ntn, size_t nfn )
     cerr << "# true-negative        = " << ntn << endl;
     cerr << "# false-positive       = " << nfp << endl;
     cerr << "# false-negative       = " << nfn << endl;
-    cerr << "accuracy               = " << ( double ( ncorr ) / double ( n ) ) << endl;
+    cerr << "# accuracy             = " << ( double ( ncorr ) / double ( n ) ) << endl;
     cerr << "# errors               = " << nerr << endl;
     cerr << "precision              = " << ( double ( ntp ) / double ( np ) ) << endl;
     cerr << "recall                 = " << ( double ( ntp ) / double ( nt ) ) << endl;
@@ -114,68 +113,56 @@ inline void libsvm2tdo ( const char *filename )
         cerr << "could not open output file " << outfilename << "\n";
         exit ( EXIT_FAILURE );
     }
-    size_t nfeat ( 0 ), nvecs ( 0 );
-    StringTokenizer toker ( "s", " :\n\t\0" );
+    size_t nfeat=0;
+    size_t nvecs=0;
     string sline;
+    vector<string> tokens;
     while ( getline ( in, sline ) ) {
-        toker.resetString ( sline );
-        if ( toker.hasMoreTokens() ) {
-            string lab = toker.nextToken();
-            ++nvecs;
-            while ( toker.hasMoreTokens() ) {
-                size_t indx = toker.nextElement<size_t> ();
-                if ( toker.hasMoreTokens() ) {
-                    string sval = toker.nextToken();
-                } else {
-                    cerr
-                        << " no matching value pair for index in input file : "
-                        << indx << " on line " << ( nvecs ) << endl;
-                }
-                if ( indx > nfeat )
-                    nfeat = indx;
-            }
-        } else {
-            break;
+        explodeString(sline," :\n\0",tokens);
+        size_t s = tokens.size();
+        ++nvecs;
+        if (s%2==0) {
+            std::cerr << "parse error on line " << nvecs << "\n";
+            std::cerr << "no label or bad index:value pair\n";
+            exit(EXIT_FAILURE);
         }
+        size_t last_index = stoull(tokens[s-2]);
+        if (last_index > nfeat) nfeat = last_index;
     }
     in.clear();
     cerr << "read " << nvecs << " vector w/ " << nfeat << " features\n";
-    in.seekg ( 0, ios::beg );
+    in.seekg(0);
     double *vecs;
     double *yalf;
+    size_t vsize = nvecs;
+    vsize *=nfeat;
     try {
-        vecs = new double[nvecs * nfeat];
+        vecs = new double[vsize];
         yalf = new double[nvecs];
     } catch ( exception& e ) {
         cerr << "error allocating memory in readDataFile\n";
         cerr << "nvecs = " << nvecs << " nfeat = " << nfeat << endl;
         exit ( EXIT_FAILURE );
     }
-    memset ( vecs, 0, sizeof ( double ) *nvecs * nfeat );
-    size_t ivec ( 0 );
-    while ( getline ( in, sline ) ) {
-        toker.resetString ( sline );
-        if ( toker.hasMoreTokens() ) {
-            int il = toker.nextElement<int> ();
-            if ( il > 0 ) {
-                yalf[ivec] = double(1);
-            } else {
-                yalf[ivec] = double(-1);
-            }
-            while ( toker.hasMoreTokens() ) {
-                size_t indx = toker.nextElement<size_t> ();
-                --indx;
-                if ( toker.hasMoreTokens() ) {
-                    vecs[ivec * nfeat + indx] = toker.nextElement<double> ();
-                } else {
-                    cerr
-                        << " no matching value pair for index in input file : "
-                        << indx << " on line " << ( nvecs ) << endl;
-                }
-            }
-            ++ivec;
-        } else {
-            break;
+    for (size_t i=0;i<vsize;++i) {
+        vecs[i]=double(0);
+    }
+    for ( size_t k = 0; k < nvecs; ++k ) {
+        getline ( in, sline );
+        explodeString(sline," :\n",tokens);
+        std::vector<std::string>::iterator iter = tokens.begin();
+        std::vector<std::string>::iterator iend = tokens.end(); 
+        int lab = stoi(*iter);
+        if (lab>0) yalf[k]=1;
+        else yalf[k]=-1;
+        ++iter;
+        while (iter!=iend) {
+            size_t indx = stoull(*iter);
+            --indx;
+            ++iter;
+            double d = stod(*iter);
+            ++iter;
+            vecs[k*nfeat+indx] = static_cast<double>(d);
         }
     }
     in.close();
@@ -185,9 +172,66 @@ inline void libsvm2tdo ( const char *filename )
     itmp = static_cast< size_t > ( nfeat );
     out.write ( ( char* ) &itmp, sizeof ( int ) );
     out.write ( ( char* ) yalf, sizeof ( double ) *nvecs );
-    out.write ( ( char* ) vecs, sizeof ( double ) *nvecs * nfeat );
+    out.write ( ( char* ) vecs, sizeof ( double ) *vsize );
     out.close();
 };
+
+//////////////////////////////////////////////////////
+// convert a tdo data file to a libsvm data file
+//////////////////////////////////////////////////////
+inline void tdo2libsvm ( const char *filename )
+{
+    string infile(filename);
+    size_t pos = infile.find(".");
+    if (pos==string::npos) {
+        std::cerr << "tdo file is not properly named! should be name.tdo \n";
+        std::cerr << "name is " << infile << "\n";
+        exit(EXIT_FAILURE);
+    }
+    string outfilename = infile.substr(0,pos);  
+    ifstream in ( filename );
+    ofstream out ( outfilename.c_str() );
+    if ( !in ) {
+        cerr << "could not open data file " << filename << "\n";
+        exit ( EXIT_FAILURE );
+    }
+    if ( !out ) {
+        cerr << "could not open output file " << outfilename << "\n";
+        exit ( EXIT_FAILURE );
+    }
+    size_t nvecs,nfeat;
+    int itmp;
+    itmp = static_cast< size_t > ( nvecs );
+
+    in.read ( ( char* ) &itmp, sizeof ( int ) );
+    nvecs = itmp;
+    in.read ( ( char* ) &itmp, sizeof ( int ) );
+    nfeat = itmp;
+    double *yalf = new double[nvecs];
+    size_t vsize = nfeat * nvecs;
+    double *vecs = new double[vsize];
+    in.read ( ( char* ) yalf, sizeof ( double ) *nvecs );
+    in.read ( ( char* ) vecs, sizeof ( double ) *nvecs * nfeat );
+    in.close();
+
+    for (size_t k=0;k<nvecs;++k) {
+        if (yalf[k] > 0.0) {
+            out << " 1 ";
+        }else{
+            out << " -1 "; 
+        }
+        double *vk = vecs + k * nfeat;
+        for (size_t m=0;m<nfeat;++m) {
+            if (fabs(vk[m]) > 1.e-14) {
+                out << (m+1) << ":" << vk[m] << " ";
+            }
+        }
+        out <<"\n";
+    }
+    out.close();
+};
+
+
 
 template <class real_t>
 inline real_t fmax ( real_t x, real_t y ) throw()

@@ -377,33 +377,26 @@ template<class svm_real> inline void svmpack::SVMOptions<svm_real>::readLIBSVMFi
         exit ( EXIT_FAILURE );
     }
     nfeat = nvecs = 0;
-    StringTokenizer toker ( "s", " :\n\t\0" );
     string sline;
+    vector<string> tokens;
     while ( getline ( in, sline ) ) {
-        toker.resetString ( sline );
-        if ( toker.hasMoreTokens() ) {
-            string lab = toker.nextToken();
-            ++nvecs;
-            while ( toker.hasMoreTokens() ) {
-                size_t indx = toker.nextElement<size_t>();
-                if ( toker.hasMoreTokens() ) {
-                    string sval = toker.nextToken();
-                } else {
-                    cerr << " no matching value pair for index in input file : " << datafile <<
-                         " on line " << ( nvecs ) << endl;
-                }
-                if ( indx > nfeat ) nfeat = indx;
-            }
-        } else {
-            break;
+        explodeString(sline," :\n\0",tokens);
+        size_t s = tokens.size();
+        ++nvecs;
+        if (s%2==0) {
+            std::cerr << "parse error on line " << nvecs << "\n";
+            std::cerr << "no label or bad index:value pair\n";
+            exit(EXIT_FAILURE);
         }
+        size_t last_index = stoull(tokens[s-2]);
+        if (last_index > nfeat) nfeat = last_index;
     }
     in.clear();
     cerr << "read " << nvecs << " vector w/ " << nfeat << " features\n";
-    in.seekg ( 0, ios::beg );
+    in.seekg(0);
+    size_t vsize = nvecs;
+    vsize *=nfeat;
     try {
-        size_t vsize = nvecs;
-        vsize *= nfeat;
         vecs = new svm_real[vsize];
         yalf = new svm_real[nvecs];
     } catch ( exception& e ) {
@@ -411,29 +404,25 @@ template<class svm_real> inline void svmpack::SVMOptions<svm_real>::readLIBSVMFi
         cerr << "nvecs = " << nvecs << " nfeat = " << nfeat << endl;
         exit ( EXIT_FAILURE );
     }
-    memset ( vecs, 0, sizeof ( svm_real ) *nvecs * nfeat );
+    for (size_t i=0;i<vsize;++i) {
+        vecs[i]=svm_real(0);
+    }
     for ( size_t k = 0; k < nvecs; ++k ) {
         getline ( in, sline );
-        toker.resetString ( sline );
-        if ( toker.hasMoreTokens() ) {
-            int il = toker.nextElement<int>();
-            if ( il > 0 ) {
-                yalf[k] = svm_real(1);
-            } else {
-                yalf[k] = svm_real(-1);
-            }
-            while ( toker.hasMoreTokens() ) {
-                size_t indx = toker.nextElement<size_t>();
-                --indx;
-                if ( toker.hasMoreTokens() ) {
-                    vecs[ ( k*nfeat+indx ) ] = toker.nextElement<svm_real>();
-                } else {
-                    cerr << " no matching value pair for index in input file : " << datafile <<
-                         " on line " << ( nvecs ) << endl;
-                }
-            }
-        } else {
-            break;
+        explodeString(sline," :\n",tokens);
+        std::vector<std::string>::iterator iter = tokens.begin();
+        std::vector<std::string>::iterator iend = tokens.end(); 
+        int lab = stoi(*iter);
+        if (lab>0) yalf[k]=1;
+        else yalf[k]=-1;
+        ++iter;
+        while (iter!=iend) {
+            size_t indx = stoull(*iter);
+            --indx;
+            ++iter;
+            double d = stod(*iter);
+            ++iter;
+            vecs[k*nfeat+indx] = static_cast<svm_real>(d);
         }
     }
     in.close();

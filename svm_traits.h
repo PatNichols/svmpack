@@ -15,37 +15,37 @@ namespace svmpack
 {
 
 template <class T> struct svm_traits {
-    static inline T eps() throw() {
+    static inline  T eps() throw() {
         return numeric_limits<T>::epsilon() * 100;
     };
-    static inline T tau() throw() {
+    static inline  T tau() throw() {
         return numeric_limits<T>::epsilon * 10;
     }
-    static inline T huge() throw() {
+    static inline  T huge() throw() {
         return numeric_limits<T>::huge();
     };
 };
 
 template <> struct svm_traits<double> {
-    static inline double eps() throw() {
+    static inline  double eps() throw() {
         return 2.e-12;
     };
-    static inline double tau() throw() {
+    static inline  double tau() throw() {
         return 2.e-14;
     }
-    static inline double huge() throw() {
+    static inline  double huge() throw() {
         return 2.e100;
     };
 };
 
 template <> struct svm_traits<float> {
-    static inline float eps() throw() {
+    static inline  float eps() throw() {
         return 2.e-6f;
     };
-    static inline float tau() throw() {
+    static inline  float tau() throw() {
         return 2.e-7f;
     }
-    static inline float huge() throw() {
+    static inline  float huge() throw() {
         return 2.e30f;
     };
 };

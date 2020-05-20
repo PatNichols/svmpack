@@ -210,7 +210,7 @@ private:
 
     inline svm_real eval0 ( const svm_real * __restrict__ v1,
                             const svm_real * __restrict__ v2 ) const throw () {
-        svm_real s ( 0 ) __attribute__((aligned(32)));
+        svm_real s ( 0 );
         for ( size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
         return s;
