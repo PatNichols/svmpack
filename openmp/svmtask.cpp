@@ -31,6 +31,14 @@ int main ( int argc, char **argv )
             solver.train();
             solver.outputModelFile();
         } else {
+#pragma omp parallel 
+            {
+                int nth = omp_get_num_threads();
+#pragma omp single
+                {
+                    std::cerr << " # of openmp threads = " << nth << "\n"; 
+                }                
+            }
             svmpack::SMOSolver<SVMREAL> solver ( options );
             solver.train();
             solver.outputModelFile();

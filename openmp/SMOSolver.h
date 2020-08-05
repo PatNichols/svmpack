@@ -18,8 +18,64 @@
 #include <omp.h>
 using namespace std;
 
+#define USE_TIMERS
+
 namespace svmpack
 {
+
+template < typename Tp >
+struct IndexPair {
+    Tp value;
+    std::int64_t index;
+    
+    IndexPair():value(0),index(-1) {}
+    
+    IndexPair(const IndexPair& p):value(p.value),index(p.index) {}
+    
+    constexpr explicit IndexPair(const Tp& d,const std::int64_t& i):value(d),index(i) {}
+    
+    constexpr IndexPair& operator=(const IndexPair& p) {
+        value = p.value;
+        index = p.index;
+        return *this;
+    }
+
+    constexpr IndexPair& Max(const IndexPair& x) noexcept {
+        if (x.value > value) {
+            value = x.value;
+            index = x.index;
+        }
+        return *this;
+    }
+    constexpr IndexPair& Min(const IndexPair& x) noexcept {
+        if (x.value < value) {
+            value = x.value;
+            index = x.index;
+        }
+        return *this;
+    }    
+    constexpr IndexPair& Max(const Tp& x, std::int64_t i) noexcept {
+        if (x > value) {
+            value = x;
+            index = i;
+        }
+        return *this;
+    }
+    constexpr IndexPair& Min(const Tp& x,std::int64_t i) noexcept {
+        if (x < value) {
+            value = x;
+            index = i;
+        }
+        return *this;
+    }    
+};
+
+template < typename Tp > inline std::ostream& operator << ( std::ostream& os,const IndexPair<Tp>& p)
+{
+    os << "( " << p.value << ", " << p.index << " )\n";
+    return os;
+}
+
 
 template<class svm_real>
 class SMOSolver
@@ -90,6 +146,9 @@ public:
     ;
 
     void findGap() throw () {
+#ifdef USE_TIMERS
+        gap_timer.start();
+#endif
         register size_t k;
         const svm_real zero ( 0 );
         register svm_real asum ( 0 ), csum ( 0 );
@@ -109,6 +168,7 @@ public:
             ++nfree;
         }
         bias = -bias;
+///// if nfree = 0 then bias = 0 so no need for an else here
         if ( nfree )
             bias /= svm_real ( nfree );
 #pragma omp parellel for  private(k) reduction(+,csum)         
@@ -116,13 +176,22 @@ public:
             csum += svmpack::fmax<svm_real> ( zero, ( dy[k] * ( grad[k] + bias ) ) );
         }
         csum *= cost;
-
-        cerr << "csum = " <<csum<<endl;
-        cerr << "asum = " <<asum<<endl;
         gap = ( csum + asum - fsum - fsum ) / ( svm_real ( 1 ) + asum + csum - fsum );
+#ifdef USE_TIMERS
+        gap_timer.stop();
+#endif
+
     };
 
-    void takeStep ( const int imax, const int imin ) throw() {
+    int takeStep ( const int imax, const int imin ) throw() {
+#ifdef USE_TIMERS
+        kmat_timer.start();
+#endif
+        kmatrix.getRows ( kmax, kmin, imax, imin );
+#ifdef USE_TIMERS
+        kmat_timer.stop();
+        step_timer.start();
+#endif
         const svm_real TAU = svm_traits<svm_real>::tau();
         svm_real a1, a2, L, H, ai, aj;
         int st1, st2;
@@ -131,7 +200,6 @@ public:
         step_return = 0;
         int s = y[imax] * y[imin];
         svm_real ds = svm_real ( s );
-        kmatrix.getRows ( kmax, kmin, imax, imin );
         const svm_real *qmax= *kmax;
         const svm_real *qmin= *kmin;
         a1 = ai = alpha[imax];
@@ -171,34 +239,99 @@ public:
         } else {
             st2 = -0x1;
         }
+#ifdef USE_TIMERS
+        step_timer.stop();
+#endif
+
         if ( fabs ( a2 - aj ) > TAU ) {
             alpha[imax] = a1;
             alpha[imin] = a2;
             status[imax] = st1;
             status[imin] = st2;
+#ifdef USE_TIMERS
+            grad_timer.start();
+#endif
             svm_real da1 = ( dy[imax] ) * ( a1 - ai );
             svm_real da2 = ( dy[imin] ) * ( a2 - aj );
-#pragma omp parellel for  private(k) 
+#pragma omp parellel for  private(k)  schedule(static,1024)
             for ( k = 0; k < nvecs; ++k ) {
                 grad[k] -= ( da1 * qmax[k] + da2 * qmin[k] );
             }
-            step_return = 1;
+#ifdef USE_TIMERS
+            grad_timer.stop();
+#endif
+            return 0;
         }
+        return -1;
     };
 
 
-    void update() noexcept;
+    int update() noexcept {
+#ifdef USE_TIMERS
+        update_timer.start();
+#endif
+        int tid,nth;
+        svm_real gmax0 = svm_traits<svm_real>::huge();
+        IndexPair<svm_real>  max_pair[128];
+        IndexPair<svm_real>  min_pair[128];
+        IndexPair<svm_real>  the_max;
+        IndexPair<svm_real>  the_min;
+        std::int64_t k;   
+#pragma omp parallel shared(max_pair,min_pair,the_max,the_min) private(tid)
+      {
+        tid = omp_get_thread_num();
+        nth = omp_get_num_threads();
+        IndexPair<svm_real> my_max(-gmax0,std::int64_t(-1));
+        IndexPair<svm_real> my_min( gmax0,std::int64_t(-1));
+        std::int64_t k;
+#pragma omp parallel for private(k) shared(nvecs) 
+        for ( k = 0; k < nvecs; ++k ) {
+            auto ys = y[k] * status[k];
+            if ( ys <= svm_real(0) ) my_max.Max(grad[k],k);
+            if ( ys >= svm_real(0) ) my_min.Min(grad[k],k);
+        }
+        max_pair[tid]=my_max;
+        min_pair[tid]=my_min;
+      }
+            the_max = max_pair[0];
+            for (k=1;k<nth;++k) {
+                the_max.Max(max_pair[k]);
+            }
+            the_min = min_pair[0];
+            for (k=1;k<nth;++k) {
+                the_min.Min(min_pair[k]);
+            }
+#ifdef USE_TIMERS
+        update_timer.stop();
+#endif
+        if ( the_max.index == std::int64_t(-1) || the_min.index == std::int64_t(-1) || 
+             the_max.index == the_min.index || ( the_max.value - the_min.value ) > eps ) {
+            return SMOSolver<svm_real>::takeStep ( int(the_max.index), int(the_min.index) );
+        }
+        return -1;
+    }
 
-    ;
+    
     void train() throw () {
+#ifdef USE_TIMERS
+        gap_timer.clear();
+        step_timer.clear();
+        grad_timer.clear();
+        kmat_timer.clear();
+        update_timer.clear();
+#endif    
+        int r;
         svm_real diff = 0;
         svm_real fold = 0;
         svm_stopwatch timer;
         timer.start();
         for ( size_t iter = 0; iter < maxits; ++iter ) {
             for ( size_t k = 0; k < nvecs; ++k ) {
-                update();
-                if ( step_return != 1 ) break;
+                r = update();
+                if ( r ) {
+                    std::cerr << "sub iteration = " << k << "\n";
+                    break;
+                }
             }
             findGap();
             diff = fsum - fold;
@@ -208,7 +341,7 @@ public:
             cerr << "diff. obj fun  = " << diff << endl;
             cerr << "gap            = " << gap << endl;
             cerr << "bias           = " << bias << endl << endl;
-            if ( step_return != 1 ) {
+            if ( r ) {
                 cerr << " converged! no more feasible step\n";
                 break;
             }
@@ -219,6 +352,14 @@ public:
         }
         timer.stop();
         cerr << "training time             = " << timer.elapsedTime() << " seconds\n";
+#ifdef USE_TIMERS
+        cerr << "step time                 = " << step_timer.elapsedTime() << " seconds\n";
+        cerr << "update time               = " << update_timer.elapsedTime() << " seconds\n";
+        cerr << "gap time                  = " << gap_timer.elapsedTime() << " seconds\n";
+        cerr << "grad time                 = " << grad_timer.elapsedTime() << " seconds\n";
+        cerr << "kmat time                 = " << kmat_timer.elapsedTime() << " seconds\n";
+#endif                    
+
     };
 
     void outputModelFile() throw () {
@@ -318,6 +459,13 @@ private:
     svm_real gap;
     svm_real eps, cost;
     const SVMOptions<svm_real>& options;
+#ifdef USE_TIMERS
+    svm_stopwatch gap_timer;
+    svm_stopwatch step_timer;
+    svm_stopwatch grad_timer;
+    svm_stopwatch update_timer;
+    svm_stopwatch kmat_timer;
+#endif
 };
 
 
@@ -325,32 +473,38 @@ struct DoubleIndexPair {
     double value;
     std::int64_t index;
     
-    DoubleIndexPair():value(0),index(-1) {}
+    constexpr DoubleIndexPair():value(0),index(-1) {}
     
-    DoubleIndexPair(const double& d,const std::int64_t& i):value(d),index(i) {}
+    constexpr DoubleIndexPair(const double& d,const std::int64_t& i):value(d),index(i) {}
     
-    DoubleIndexPair& Max(const DoubleIndexPair& x) noexcept {
+    constexpr DoubleIndexPair& operator=(const DoubleIndexPair& p) noexcept {
+        value = p.value;
+        index = p.index;
+        return *this;
+    }
+    
+    constexpr DoubleIndexPair& Max(const DoubleIndexPair& x) noexcept {
         if (x.value > value) {
             value = x.value;
             index = x.index;
         }
         return *this;
     }
-    DoubleIndexPair& Min(const DoubleIndexPair& x) noexcept {
+    constexpr DoubleIndexPair& Min(const DoubleIndexPair& x) noexcept {
         if (x.value < value) {
             value = x.value;
             index = x.index;
         }
         return *this;
     }    
-    DoubleIndexPair& Max(const double& x, std::int64_t i) noexcept {
+    constexpr DoubleIndexPair& Max(const double& x, std::int64_t i) noexcept {
         if (x > value) {
             value = x;
             index = i;
         }
         return *this;
     }
-    DoubleIndexPair& Min(const double& x,std::int64_t i) noexcept {
+    constexpr DoubleIndexPair& Min(const double& x,std::int64_t i) noexcept {
         if (x < value) {
             value = x;
             index = i;
@@ -365,30 +519,30 @@ struct FloatIndexPair {
     
     FloatIndexPair():value(0),index(-1) {}
     
-    FloatIndexPair(const double& d,const std::int64_t& i):value(d),index(i) {}
+    constexpr FloatIndexPair(const double& d,const std::int64_t& i):value(d),index(i) {}
     
-    FloatIndexPair& Max(const FloatIndexPair& x) noexcept {
+    constexpr FloatIndexPair& Max(const FloatIndexPair& x) noexcept {
         if (x.value > value) {
             value = x.value;
             index = x.index;
         }
         return *this;
     }
-    FloatIndexPair& Min(const FloatIndexPair& x) noexcept {
+    constexpr FloatIndexPair& Min(const FloatIndexPair& x) noexcept {
         if (x.value < value) {
             value = x.value;
             index = x.index;
         }
         return *this;
     }    
-    FloatIndexPair& Max(const float& x, std::int64_t i) noexcept {
+    constexpr FloatIndexPair& Max(const float& x, std::int64_t i) noexcept {
         if (x > value) {
             value = x;
             index = i;
         }
         return *this;
     }
-    FloatIndexPair& Min(const float& x,std::int64_t i) noexcept {
+    constexpr FloatIndexPair& Min(const float& x,std::int64_t i) noexcept {
         if (x < value) {
             value = x;
             index = i;
@@ -398,83 +552,14 @@ struct FloatIndexPair {
 };
 
 
-template < typename T >
-inline void SMOSolver<T>::update() noexcept {
-        step_return = 0;
-        register T gmin = svm_traits<T>::huge();
-        register T gmax = -gmin;
-        register int imax = -1;
-        register int imin = -1;
-        int max_list[128];
-        int min_list[128];
-        T gmax_l[128];
-        T gmin_l[128];
-        T m_gmax,m_gmin;
-        T m_imax,m_imin; 
-        std::size_t k;   
-#pragma omp parallel private(m_imax,m_imin,m_gmax,m_gmin) shared(gmax_l,gmin_l,max_list,min_list)
-   {
-        int tid = omp_get_thread_num();
-        int nth = omp_get_num_threads();
-        int m_imax = imax;
-        int m_imin = imin;
-        T m_gmax = gmax;
-        T m_gmin = gmin;         
-#pragma omp parallel for shared(nvecs) private(k)  
-        for ( k = 0; k < nvecs; ++k ) {
-            register int ys = y[k] * status[k];
-            register T gk = grad[k];
-            if ( ys != 1 && gk > m_gmax ) {
-                m_gmax = gk;
-                m_imax = k;
-            }
-            if ( ys != -1 && gk < m_gmin ) {
-                m_gmin = gk;
-                m_imin = k;
-            }
-        }
-        max_list[tid]=m_imax;
-        min_list[tid]=m_imin;
-        gmax_l[tid]=m_gmax;
-        gmin_l[tid]=m_gmin;
-#pragma omp single 
-        {
-            gmax = gmax_l[0];
-            imax = max_list[0];
-            for (std::size_t k=1;k<nth;++k) {
-                T gmx = gmax_l[k];
-                if (gmx > gmax) {
-                    gmax=gmx;
-                    imax=max_list[k];
-                }
-            }
-        }
-#pragma omp single
-        {
-            gmin = gmin_l[0];
-            imin = min_list[0];
-            for (std::size_t k=1;k<nth;++k) {
-                T gmx = gmin_l[k];
-                if (gmx < gmin) {
-                    gmin=gmx;
-                    imin=min_list[k];
-                }
-            }
-
-        }
-   }
-        if ( imax != -1 && imin != -1 && imax != imin && ( ( gmax - gmin ) > eps ) ) {
-            SMOSolver<T>::takeStep ( imax, imin );
-        }
-    }
-    ;
-
-
 template <>
-inline void SMOSolver<double>::update() noexcept {
-        step_return = 0;
+inline int SMOSolver<double>::update() noexcept {
+#ifdef USE_TIMERS
+        update_timer.start();
+#endif
         const std::int64_t lneg1 = std::int64_t{1}; 
-
+        double one(1);
+        double neg_one(-1);
         DoubleIndexPair mymax(-2.e300,-1LL);
         DoubleIndexPair mymin( 2.e300,-1LL);
 #pragma omp declare reduction( MyDMax: DoubleIndexPair: omp_out.Max(omp_in)) \
@@ -484,21 +569,26 @@ inline void SMOSolver<double>::update() noexcept {
  initializer ( omp_priv=DoubleIndexPair( 2.e300,-1LL) )
 
        std::size_t k;
-#pragma omp parallel for shared(nvecs) private(k) reduction(MyDMax:mymax) reduction(MyDMin:mymin)
+#pragma omp parallel for shared(nvecs) private(k) reduction(MyDMax:mymax) reduction(MyDMin:mymin) schedule(static,500)
         for ( k = 0; k < nvecs; ++k ) {
             auto ys = y[k] * status[k];
-            if ( ys != 1 ) mymax.Max(grad[k],k);
-            if ( ys != -1) mymin.Min(grad[k],k);
+            if ( ys <= 0.0 ) mymax.Max(grad[k],k);
+            if ( ys >= 0.0 ) mymin.Min(grad[k],k);
         }
+#ifdef USE_TIMERS
+        update_timer.stop();
+#endif
         if ( mymax.index != -1 && mymin.index != -1 && mymax.index != mymin.index && ( ( mymax.value - mymin.value ) > eps ) ) {
-            SMOSolver<double>::takeStep ( mymax.index, mymin.index );
+            return SMOSolver<double>::takeStep ( mymax.index, mymin.index );
         }
-    }
-    ;
-
+        return -1;
+}
 
 template <>
-inline void SMOSolver<float>::update() noexcept {
+inline int SMOSolver<float>::update() noexcept {
+#ifdef USE_TIMERS
+        update_timer.start();
+#endif
         step_return = 0;
         const std::int64_t lneg1 = std::int64_t{1}; 
 
@@ -511,17 +601,22 @@ inline void SMOSolver<float>::update() noexcept {
  initializer ( omp_priv=FloatIndexPair( 2.e30f,-1LL) )
 
        std::int64_t k;
-#pragma omp parallel for private(k) shared(nvecs) reduction(MyDMax:mymax) reduction(MyDMin:mymin)
+#pragma omp parallel for private(k) shared(nvecs) reduction(MyDMax:mymax) reduction(MyDMin:mymin) schedule(static,1024)
         for ( k = 0; k < nvecs; ++k ) {
             auto ys = y[k] * status[k];
-            if ( ys != 1 ) mymax.Max(grad[k],k);
-            if ( ys != -1) mymin.Min(grad[k],k);
+            if ( ys <= 0.0F ) mymax.Max(grad[k],k);
+            if ( ys >= 0.0F ) mymin.Min(grad[k],k);
         }
+
+#ifdef USE_TIMERS
+        update_timer.stop();
+#endif
+        
         if ( mymax.index != -1 && mymin.index != -1 && mymax.index != mymin.index && ( ( mymax.value - mymin.value ) > eps ) ) {
-            SMOSolver<float>::takeStep ( mymax.index, mymin.index );
+            return SMOSolver<float>::takeStep ( mymax.index, mymin.index );
         }
-    }
-    ;
+        return -1;
+}
 
 
 }

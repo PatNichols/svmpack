@@ -16,18 +16,21 @@ CXXFLAGS= -O3 -I/Users/pnichols/homebrew/Cellar/gcc/9.3.0/lib/gcc/9/gcc/x86_64-a
 
 #CXXFLAGS=-ggdb -g 
 
-LIBS= -L/Users/pnichols/homebrew/lib -lboost_thread-mt -lpthread -lm 
+LIBS=-lpthread -lm 
 SRCS=$(wildcard *.cpp)
 HDRS=$(wildcard *.h)
 OBJS=$(patsubst %.cpp,%.o,$(SRCS))
     
 
 all:  svmtask svmtranslate
-        
+
+%.o : %.cpp
+	$(CXX) $(CXXFLAGS) @.cpp 
+  	      
 svmtask: $(HDRS) $(OBJS) svmtask.cpp
 	$(CXX) $(CXXFLAGS) -o svmtask svmtask.cpp $(LIBS)
 
-svmtranslate: $(HDRS) $(OBJS) $(SRCS)
+svmtranslate: $(HDRS) $(OBJS) svmtranslate.cpp
 	$(CXX) $(CXXFLAGS) -o svmtranslate svmtranslate.cpp $(LIBS)
 
             

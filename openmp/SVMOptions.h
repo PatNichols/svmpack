@@ -236,6 +236,7 @@ template<class svm_real> inline SVMOptions<svm_real>::SVMOptions ( int argc, cha
         string cfile = opts.getValue<string> ( "config" );
         opts.parseConfigFile ( cfile.c_str() );
     }
+    opts.parseEnv("SVM");
     datafile = opts.getValue<string> ( "data" );
     modelfile = opts.getValue<string> ( "model" );
     outfile = opts.getValue<string> ( "out" );

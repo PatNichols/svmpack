@@ -11,6 +11,7 @@
 #include "svm_utils.h"
 #include "svm_traits.h"
 #include <cmath>
+#include <omp.h>
 namespace svmpack
 {
 
@@ -50,11 +51,14 @@ public:
             c1 = -c1;
         }
         if ( options.scaleKernel() ) {
+            size_t k;
             const svm_real * v1 = vecs;
             const svm_real tau = svmpack::svm_traits<svm_real>::tau();
             switch ( ktype ) {
             case 0:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+#pragma omp parallel for private(k,v1)             
+                for ( k = 0; k < nvecs; ++k) {
+                    v1 = vecs + k * nfeat;
                     svm_real sk = eval0 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -64,7 +68,9 @@ public:
                 }
                 break;
             case 1:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+#pragma omp parallel for private(k,v1)             
+                for ( size_t k = 0; k < nvecs; ++k) {
+                    v1 = vecs + k * nfeat;
                     svm_real sk = eval1 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -74,12 +80,15 @@ public:
                 }
                 break;
             case 2:
+#pragma omp parallel for private(k)             
                 for ( size_t k = 0; k < nvecs; ++k ) {
                     scal[k] = one;
                 }
                 break;
             case 3:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+#pragma omp parallel for private(k,v1)             
+                for ( size_t k = 0; k < nvecs; ++k) {
+                    v1 = vecs + k * nfeat;                
                     svm_real sk = eval3 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -90,7 +99,9 @@ public:
                 break;
             }
         } else {
-            for ( size_t k = 0; k < nvecs; ++k ) {
+            size_t k;
+#pragma omp parallel for private(k)             
+            for ( k = 0; k < nvecs; ++k ) {
                 scal[k] = one;
             }
         }
@@ -163,25 +174,25 @@ public:
         size_t k;
         switch ( ktype ) {
         case 0:
-#pragma omp parallel for private(k)         
+#pragma omp parallel for private(k) schedule(static,500)        
             for ( k = 0; k < nvecs; ++k ) {
                 res[k] = eval0 ( v1, v2 + k *nfeat ) * scal[k] * s1;
             }
             break;
         case 1:
-#pragma omp parallel for private(k)         
+#pragma omp parallel for private(k) schedule(static,500)         
             for ( size_t k = 0; k < nvecs; ++k ) {
                 res[k] = eval1 ( v1, v2+k*nfeat ) * scal[k] * s1;
             }
             break;
         case 2:
-#pragma omp parallel for private(k)         
+#pragma omp parallel for private(k) schedule(static,500)        
             for ( size_t k = 0; k < nvecs; ++k ) {
                 res[k] = eval2 ( v1, v2+k*nfeat );
             }
             break;
         case 3:
-#pragma omp parallel for private(k)         
+#pragma omp parallel for private(k) schedule(static,500)        
             for ( size_t k = 0; k < nvecs; ++k ) {
                 res[k] = eval3 ( v1, v2+k*nfeat ) * scal[k] * s1;
             }
@@ -197,8 +208,8 @@ private:
     size_t nvecs, nfeat, ktype, kpow;
 
 
-    inline svm_real eval0 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
+    constexpr svm_real eval0 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
         register svm_real s ( 0 );
         for ( register size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
@@ -206,8 +217,8 @@ private:
     }
     ;
 
-    inline svm_real eval1 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
+    constexpr svm_real eval1 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
         register svm_real s ( 0 );
         for ( register size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
@@ -215,8 +226,8 @@ private:
     }
     ;
 
-    inline svm_real eval3 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
+    constexpr svm_real eval3 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
         register svm_real s ( 0 );
         for ( register size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
@@ -224,10 +235,10 @@ private:
     }
     ;
 
-    inline svm_real eval2 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
-        register svm_real t, s ( 0 );
-        for ( register size_t k = 0; k < nfeat; ++k ) {
+    constexpr svm_real eval2 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
+        svm_real t, s ( 0.F );
+        for ( size_t k = 0; k < nfeat; ++k ) {
             t = v1[k] - v2[k];
             s += t * t;
         }

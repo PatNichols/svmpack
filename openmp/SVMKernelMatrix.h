@@ -10,6 +10,7 @@
 #include "SVMOptions.h"
 #include "SVMKernelEvaluator.h"
 #include "svm_stopwatch.h"
+#include <omp.h>
 #include <cstdlib>
 using namespace std;
 
@@ -67,7 +68,7 @@ public:
             }
         }
         if (cnt) {
-            memcpyh(kmat+(koff2-cnt)*nvecs,buffer,sizeof(svm_real)*cnt*nvecs);
+            memcpy(kmat+(koff2-cnt)*nvecs,buffer,sizeof(svm_real)*cnt*nvecs);
         }
         delete [] buffer;
 #else
@@ -185,6 +186,8 @@ public:
         size_t max_found = 0;
         size_t min_found = 0;
         size_t k;
+        int ik;
+#pragma omp parallel for private(k,ik) reduction(max:max_found) reduction(max:min_found) schedule(static,500)
         for ( k = 0; k < cache_size; ++k ) {
             int ik = indx[k];
             if ( ik == imax ) max_found = k + 1;
