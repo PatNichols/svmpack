@@ -8,19 +8,20 @@
 #ifndef SVMKERNELEVALUATOR_H_
 #define SVMKERNELEVALUATOR_H_
 #include "SVMOptions.h"
-#include "svm_utils.h"
-#include "svm_traits.h"
+#include "SVMUtils.h"
+#include "SVMTraits.h"
 #include <cmath>
+
 namespace svmpack
 {
 
-template<class svm_real>
+template < typename svm_real >
 class SVMKernelEvaluator
 {
 public:
     SVMKernelEvaluator ( const SVMOptions<svm_real>& options ) :
             vecs ( options.getVectorsPtr() ),
-            scal ( 0x0 ),
+            scal ( nullptr ),
             c1 ( options.getKernelCof1() ),
             c2 ( options.getKernelCof2() ),
             nvecs ( options.getNVectors() ),
@@ -54,7 +55,7 @@ public:
             const svm_real tau = svmpack::svm_traits<svm_real>::tau();
             switch ( ktype ) {
             case 0:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+                for ( std::size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
                     svm_real sk = eval0 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -64,7 +65,7 @@ public:
                 }
                 break;
             case 1:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+                for ( std::size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
                     svm_real sk = eval1 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -74,12 +75,12 @@ public:
                 }
                 break;
             case 2:
-                for ( size_t k = 0; k < nvecs; ++k ) {
+                for ( std::size_t k = 0; k < nvecs; ++k ) {
                     scal[k] = one;
                 }
                 break;
             case 3:
-                for ( size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
+                for ( std::size_t k = 0; k < nvecs; ++k, v1 += nfeat ) {
                     svm_real sk = eval3 ( v1, v1 );
                     if ( sk > tau ) {
                         scal[k] = one / sqrt ( sk );
@@ -90,7 +91,7 @@ public:
                 break;
             }
         } else {
-            for ( size_t k = 0; k < nvecs; ++k ) {
+            for ( std::size_t k = 0; k < nvecs; ++k ) {
                 scal[k] = one;
             }
         }
@@ -101,16 +102,16 @@ public:
         delete [] scal;
     };
 
-    inline const svm_real *getScaleFactorPtr() const throw() {
+    inline const svm_real *getScaleFactorPtr() const noexcept {
         return scal;
     };
 
-    inline svm_real getScaleFactor ( size_t ix ) const throw() {
+    inline svm_real getScaleFactor ( std::size_t ix ) const noexcept {
         return scal[ix];
     };
 
     inline svm_real eval ( const svm_real * __restrict__ v1,
-                           const svm_real * __restrict__ v2 ) const throw () {
+                           const svm_real * __restrict__ v2 ) const noexcept {
         switch ( ktype ) {
         case 0:
             return eval0 ( v1, v2 );
@@ -125,7 +126,7 @@ public:
     }
     ;
 
-    inline svm_real eval ( const svm_real * __restrict__ v1, const size_t ix ) const throw () {
+    inline svm_real eval ( const svm_real * __restrict__ v1, const std::size_t ix ) const noexcept {
         const svm_real * __restrict__ v2 = vecs + ix * nfeat;
         switch ( ktype ) {
         case 0:
@@ -141,7 +142,7 @@ public:
     }
     ;
 
-    inline svm_real eval ( const svm_real * __restrict__ v1 ) const throw () {
+    inline svm_real eval ( const svm_real * __restrict__ v1 ) const noexcept {
         switch ( ktype ) {
         case 0:
             return eval0 ( v1, v1 );
@@ -156,28 +157,28 @@ public:
     }
     ;
 
-    inline void genRow ( svm_real * __restrict__ res, const size_t ix ) const throw () {
+    inline void genRow ( svm_real * __restrict__ res, const std::size_t ix ) const noexcept {
         const svm_real *const v1 = vecs + ix * nfeat;
         const svm_real s1 = scal[ix];
         const svm_real * v2 = vecs;
         switch ( ktype ) {
         case 0:
-            for ( size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
+            for ( std::size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
                 res[k] = eval0 ( v1, v2 ) * scal[k] * s1;
             }
             break;
         case 1:
-            for ( size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
+            for ( std::size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
                 res[k] = eval1 ( v1, v2 ) * scal[k] * s1;
             }
             break;
         case 2:
-            for ( size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
+            for ( std::size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
                 res[k] = eval2 ( v1, v2 );
             }
             break;
         case 3:
-            for ( size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
+            for ( std::size_t k = 0; k < nvecs; ++k, v2 += nfeat ) {
                 res[k] = eval3 ( v1, v2 ) * scal[k] * s1;
             }
             break;
@@ -186,43 +187,43 @@ public:
     }
     ;
 private:
-    const svm_real *vecs;
+    const svm_real * vecs;
     svm_real *scal;
     svm_real c1, c2;
-    size_t nvecs, nfeat, ktype, kpow;
+    std::size_t nvecs, nfeat, ktype, kpow;
 
 
-    inline svm_real eval0 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
-        register svm_real s ( 0 );
-        for ( register size_t k = 0; k < nfeat; ++k )
+    constexpr svm_real eval0 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
+        svm_real s ( 0 );
+        for ( std::size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
         return s;
     }
     ;
 
-    inline svm_real eval1 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
-        register svm_real s ( 0 );
-        for ( register size_t k = 0; k < nfeat; ++k )
+    constexpr svm_real eval1 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
+        svm_real s ( 0 );
+        for ( std::size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
         return svmpack::powi<svm_real> ( ( s * c1 + c2 ), kpow );
     }
     ;
 
-    inline svm_real eval3 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
-        register svm_real s ( 0 );
-        for ( register size_t k = 0; k < nfeat; ++k )
+    constexpr svm_real eval3 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
+        svm_real s ( 0 );
+        for ( std::size_t k = 0; k < nfeat; ++k )
             s += v1[k] * v2[k];
         return tanh ( ( c1 * s + c2 ) );
     }
     ;
 
-    inline svm_real eval2 ( const svm_real * __restrict__ v1,
-                            const svm_real * __restrict__ v2 ) const throw () {
-        register svm_real t, s ( 0 );
-        for ( register size_t k = 0; k < nfeat; ++k ) {
+    constexpr svm_real eval2 ( const svm_real * __restrict__ v1,
+                            const svm_real * __restrict__ v2 ) const noexcept {
+        svm_real t, s ( 0 );
+        for ( std::size_t k = 0; k < nfeat; ++k ) {
             t = v1[k] - v2[k];
             s += t * t;
         }

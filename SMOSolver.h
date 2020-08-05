@@ -17,6 +17,8 @@
 #include <cstring>
 using namespace std;
 
+#define USE_TIMERS
+
 namespace svmpack
 {
 
@@ -35,7 +37,8 @@ public:
             fsum ( 0 ), bias ( 0 ), gap ( 0 ),
             eps ( options_in.getEpsilon() ),
             cost ( options_in.getCost() ),
-            options ( options_in ) {
+            options ( options_in )             
+    {
         try {
             kmax=new svm_real*[1];
             kmin=new svm_real*[1];
@@ -62,8 +65,7 @@ public:
             status[k] = -1;
             y[k] = ( dy[k] > zero ) ? 1:-1;
         }
-    }
-    ;
+    };
 
     ~SMOSolver() {
         delete[] status;
@@ -89,6 +91,9 @@ public:
     ;
 
     void findGap() throw () {
+#ifdef USE_TIMERS
+        gap_timer.start();
+#endif    
         register size_t k;
         const svm_real zero ( 0 );
         register svm_real asum ( 0 ), csum ( 0 );
@@ -116,9 +121,16 @@ public:
         cerr << "csum = " <<csum<<endl;
         cerr << "asum = " <<asum<<endl;
         gap = ( csum + asum - fsum - fsum ) / ( svm_real ( 1 ) + asum + csum - fsum );
+#ifdef USE_TIMERS
+        gap_timer.stop();
+#endif    
+
     };
 
     void takeStep ( const int imax, const int imin ) throw() {
+#ifdef USE_TIMERS
+        step_timer.start();
+#endif    
         const svm_real TAU = svm_traits<svm_real>::tau();
         svm_real a1, a2, L, H, ai, aj;
         int st1, st2;
@@ -167,6 +179,9 @@ public:
         } else {
             st2 = -0x1;
         }
+#ifdef USE_TIMERS
+        step_timer.stop();
+#endif            
         if ( fabs ( a2 - aj ) > TAU ) {
             alpha[imax] = a1;
             alpha[imin] = a2;
@@ -174,15 +189,24 @@ public:
             status[imin] = st2;
             svm_real da1 = ( dy[imax] ) * ( a1 - ai );
             svm_real da2 = ( dy[imin] ) * ( a2 - aj );
+#ifdef USE_TIMERS
+            grad_timer.start();
+#endif            
             for ( k = 0; k < nvecs; ++k ) {
                 grad[k] -= ( da1 * qmax[k] + da2 * qmin[k] );
             }
+#ifdef USE_TIMERS
+            grad_timer.stop();
+#endif            
             step_return = 1;
         }
     };
 
 
     void update() throw () {
+#ifdef USE_TIMERS
+        update_timer.start();
+#endif                
         step_return = 0;
         register svm_real gmin = svm_traits<svm_real>::huge();
         register svm_real gmax = -gmin;
@@ -200,12 +224,21 @@ public:
                 imin = k;
             }
         }
+#ifdef USE_TIMERS
+        update_timer.stop();
+#endif                    
         if ( imax != -1 && imin != -1 && imax != imin && ( ( gmax - gmin ) > eps ) ) {
             takeStep ( imax, imin );
         }
     }
     ;
     void train() throw () {
+#ifdef USE_TIMERS
+        step_timer.clear();
+        update_timer.clear();
+        gap_timer.clear();
+        grad_timer.clear();
+#endif                        
         svm_real diff = 0;
         svm_real fold = 0;
         svm_stopwatch timer;
@@ -234,6 +267,12 @@ public:
         }
         timer.stop();
         cerr << "training time             = " << timer.elapsedTime() << " seconds\n";
+#ifdef USE_TIMERS
+        cerr << "step time                 = " << step_timer.elapsedTime() << " seconds\n";
+        cerr << "update time               = " << update_timer.elapsedTime() << " seconds\n";
+        cerr << "gap time                  = " << gap_timer.elapsedTime() << " seconds\n";
+        cerr << "grad time                 = " << grad_timer.elapsedTime() << " seconds\n";
+#endif                    
     };
 
     void outputModelFile() throw () {
@@ -332,6 +371,12 @@ private:
     svm_real gap;
     svm_real eps, cost;
     const SVMOptions<svm_real>& options;
+#ifdef USE_TIMERS
+    svm_stopwatch step_timer;
+    svm_stopwatch update_timer;
+    svm_stopwatch gap_timer;
+    svm_stopwatch grad_timer;
+#endif
 };
 
 }
